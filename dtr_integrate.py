@@ -2,7 +2,6 @@ import re
 import argparse
 import xml.etree.ElementTree as ET
 from typing import Type
-from itertools import zip_longest
 
 parser = argparse.ArgumentParser(description='Interpolate correct DocTimeRels in system output.')
 parser.add_argument('--sys_out', type=str, help='System output file requiring DocTimeRels')
@@ -13,22 +12,6 @@ event_rels = [
     'OVERLAP',
     'BEFORE',
 ]
-
-# Taken from Python itertools recipes
-def grouper(iterable, n, *, incomplete='fill', fillvalue=None):
-    "Collect data into non-overlapping fixed-length chunks or blocks"
-    # grouper('ABCDEFG', 3, fillvalue='x') --> ABC DEF Gxx
-    # grouper('ABCDEFG', 3, incomplete='strict') --> ABC DEF ValueError
-    # grouper('ABCDEFG', 3, incomplete='ignore') --> ABC DEF
-    args = [iter(iterable)] * n
-    if incomplete == 'fill':
-        return zip_longest(*args, fillvalue=fillvalue)
-    if incomplete == 'strict':
-        return zip(*args, strict=True)
-    if incomplete == 'ignore':
-        return zip(*args)
-    else:
-        raise ValueError('Expected fill, strict, or ignore')
 
 class Event:
 
@@ -125,13 +108,15 @@ def extract_eventrel_with_doctimerel(line, xml_tree):
     
 def main(sys_out):
     current_gold_xml = None
+    outfile_name = 'DocTimeRel_'
     with open(sys_out, 'r') as infile:
         for line in infile:
             if line.startswith('Doc id'):
                 filename = line.split(':')[-1]
                 current_gold_xml = ET.parse(filename).getroot()
             else:
-                extract_eventrel_with_doctimerel()
+                event_rel, begin, end = extract_eventrel_with_doctimerel(line, current_gold_xml)
+                
 
 if __name__=='__main__':
     args = parser.parse_args()
