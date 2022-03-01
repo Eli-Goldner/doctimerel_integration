@@ -26,10 +26,10 @@ class Event:
     ):
         self.event_name = event_name
         self.event_type = event_type,
-        self.begin_offset = self.begin_offset
-        self.end_offset = self.end_offset
+        self.begin_offset = begin_offset
+        self.end_offset = end_offset
         self.event_tag = event_tag
-        self.doc_time_rel = self.doc_time_rel
+        self.doc_time_rel = doc_time_rel
 
     def __str__(self):
         main_body = f'type={self.event_type}!{self.begin_offset}-{self.end_offset}!{self.event_tag}'
@@ -55,6 +55,7 @@ class EventRel:
 
 def string2event(event_str: str):
     event_ls = re.split('\(|\)', event_str)[:-1]
+    print(event_ls)
     raw_type, raw_offsets, raw_tag = event_ls[1].split('!')
     event_name = event_ls[0]
     event_type = int(raw_type.split('=')[1])
@@ -63,10 +64,10 @@ def string2event(event_str: str):
     return Event(event_name, event_type, begin_offset, end_offset, event_tag)
     
 def extract_events(events_str: str):
-    return (string2event(event.strip()) for event in events_str[1:-1].split(','))
+    return [string2event(event.strip()) for event in events_str[1:-1].split(',')]
     
 def extract_event_rel(sysout_line : str):
-    event_rel = begin_offset = end_offset = remainder = events = None
+    event_rel = begin_offset = end_offset = remainder = None
     for rel in event_rels:
         rel_split = re.split(rel, sysout_line)
         if len(rel_split) > 1:
@@ -83,7 +84,8 @@ def extract_event_rel(sysout_line : str):
                 start = stack.pop()
                 if start == 0:
                    end_offset = begin_offset + i + 1
-                   event_1, event_2 = extract_events(remainder[:i])
+                   print(remainder[:i + 1])
+                   event_1, event_2 = extract_events(remainder[:i + 1])
                    return (EventRel(event_rel, event_1, event_2), begin_offset, end_offset)
 
 def event_offset_to_span(event : Type[Event]):
@@ -97,9 +99,9 @@ def extract_eventrel_with_doctimerel(line, xml_tree):
     for entity in xml_tree.iter('entity'):
         span = entity.find('span').text
         if span == event_1_span:
-            doctimerel_dict['event_1'] = entity.find('doctimerel').text
+            doctimerel_dict['event_1'] = entity.find('properties').find('DocTimeRel').text
         if span == event_2_span:
-            doctimerel_dict['event_2'] = entity.find('doctimerel').text
+            doctimerel_dict['event_2'] = entity.find('properties').find('DocTimeRel').text
         if len(doctimerel_dict) > 1:
             break
     event_rel.event_1.doc_time_rel = doctimerel_dict['event_1']
@@ -108,16 +110,21 @@ def extract_eventrel_with_doctimerel(line, xml_tree):
     
 def main(sys_out):
     current_gold_xml = None
-    outfile_name = 'DocTimeRel_'
-    with open(sys_out, 'r') as infile:
+    outfile_name = 'DocTimeRel_' + sys_out.split('/')[-1]
+    with open(sys_out, 'r') as infile, open(outfile_name, 'w') as outfile:
         for line in infile:
             if line.startswith('Doc id'):
-                filename = line.split(':')[-1]
+                outfile.write(line)
+                outfile.write('\n')
+                filename = line.split(':')[-1].strip()
                 current_gold_xml = ET.parse(filename).getroot()
             else:
                 event_rel, begin, end = extract_eventrel_with_doctimerel(line, current_gold_xml)
+                out_line = line[:begin] + str(event_rel) + line[end:]
+                outfile.write(out_line)
+                outfile.write('\n')
                 
 
 if __name__=='__main__':
     args = parser.parse_args()
-    main(args.sys_out, args.doc_time_file)
+    main(args.sys_out)
