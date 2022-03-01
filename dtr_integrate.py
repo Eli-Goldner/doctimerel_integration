@@ -2,10 +2,10 @@ import re
 import argparse
 import xml.etree.ElementTree as ET
 from typing import Type
+from itertools import zip_longest
 
 parser = argparse.ArgumentParser(description='Interpolate correct DocTimeRels in system output.')
 parser.add_argument('--sys_out', type=str, help='System output file requiring DocTimeRels')
-parser.add_argument('--doc_time_file', type=str, help='Gold annotation file containing the DocTimeRels')
 
 event_rels = [
     'CONTAINS-SUBEVENT',
@@ -14,29 +14,46 @@ event_rels = [
     'BEFORE',
 ]
 
-# Smallest event relation name is BEFORE
-# Use this for chunking
-min_prefix_len = 6
+# Taken from Python itertools recipes
+def grouper(iterable, n, *, incomplete='fill', fillvalue=None):
+    "Collect data into non-overlapping fixed-length chunks or blocks"
+    # grouper('ABCDEFG', 3, fillvalue='x') --> ABC DEF Gxx
+    # grouper('ABCDEFG', 3, incomplete='strict') --> ABC DEF ValueError
+    # grouper('ABCDEFG', 3, incomplete='ignore') --> ABC DEF
+    args = [iter(iterable)] * n
+    if incomplete == 'fill':
+        return zip_longest(*args, fillvalue=fillvalue)
+    if incomplete == 'strict':
+        return zip(*args, strict=True)
+    if incomplete == 'ignore':
+        return zip(*args)
+    else:
+        raise ValueError('Expected fill, strict, or ignore')
 
 class Event:
 
     def __init__(
             self,
             event_name : str,
-            original_begin_offset : int,
-            original_end_offset : int,
+            event_type : int,
+            begin_offset : int,
+            end_offset : int,
+            event_tag : str,
             doc_time_rel : str = None
     ):
         self.event_name = event_name
-        self.original_begin_offset = self.original_begin_offset
-        self.original_end_offset = self.original_end_offset
+        self.event_type = event_type,
+        self.begin_offset = self.begin_offset
+        self.end_offset = self.end_offset
+        self.event_tag = event_tag
         self.doc_time_rel = self.doc_time_rel
 
     def __str__(self):
-        pass
-
-    def __repr__(self):
-        pass
+        main_body = f'type={self.event_type}!{self.begin_offset}-{self.end_offset}!{self.event_tag}'
+        if self.doc_time_rel:
+            return f'{self.event_name}({main_body}; doctimerel={self.doc_time_rel})'
+        else:
+            return f'{self.event_name}({main_body})'
     
 class EventRel:
 
@@ -51,53 +68,70 @@ class EventRel:
        self.event_2 = event_2
 
     def __str__(self):
-       pass 
+        return f'{self.rel_name}({str(self.event_1)}, {str(self.event_2)})' 
 
-    def __repr__(self):
-        pass
-
-def string2event_rel(event_rel : str, events_str: str) -> Type[EventRel]:
-    pass
-
-def chunk_event_rel(sysout_line : str):
-     
-
-def parenthetic_contents(string, events=None):
-    if events is None:
-        events = set()
-    prefix = 'CONTAINS-SUBEVENT'
-    prefix_len = len(prefix)
-    if string.startswith(prefix):
-        new_str = string[prefix_len:]
+def string2event(event_str: str):
+    event_ls = re.split('\(|\)', event_str)[:-1]
+    raw_type, raw_offsets, raw_tag = event_ls[1].split('!')
+    event_name = event_ls[0]
+    event_type = int(raw_type.split('=')[1])
+    begin_offset, end_offset = [int(offset) for offset in raw_offsets.split('-')]
+    event_tag = raw_tag
+    return Event(event_name, event_type, begin_offset, end_offset, event_tag)
+    
+def extract_events(events_str: str):
+    return (string2event(event.strip()) for event in events_str[1:-1].split(','))
+    
+def extract_event_rel(sysout_line : str):
+    event_rel = begin_offset = end_offset = remainder = events = None
+    for rel in event_rels:
+        rel_split = re.split(rel, sysout_line)
+        if len(rel_split) > 1:
+             event_rel = rel
+             begin_offset = len(rel_split[0])
+             remainder = rel_split[1]
+             break
+    if remainder:
         stack = []
-        for i, c in enumerate(new_str):
+        for i, c in enumerate(remainder):
             if c == '(':
                 stack.append(i)
             elif c == ')' and stack:
                 start = stack.pop()
                 if start == 0:
-                    events.add(string2event(new_str[start+1:i]))
-                    return parenthetic_contents(string[prefix_len+i+1:], events)
-    elif len(string) > prefix_len:
-        return parenthetic_contents(string[1:], events)
-    else:
-        return events
+                   end_offset = begin_offset + i + 1
+                   event_1, event_2 = extract_events(remainder[:i])
+                   return (EventRel(event_rel, event_1, event_2), begin_offset, end_offset)
 
-def get_events(line):
-    # Get the arguments of CONTAINS-SUBEVENT
-    raw_events = re.search(r'CONTAINS-SUBEVENT\((.*)\)', line).group(1)
-    events_with_indices = [idx_event.strip() for idx_event in raw_events.split(',')]
+def event_offset_to_span(event : Type[Event]):
+    return f'{event.begin_offset},{event.end_offset}'
+               
+def extract_eventrel_with_doctimerel(line, xml_tree):
+    event_rel, begin_offset, end_offset = extract_event_rel(line)
+    doctimerel_dict = {}
+    event_1_span = event_offset_to_span(event_rel.event_1)
+    event_2_span = event_offset_to_span(event_rel.event_2)
+    for entity in xml_tree.iter('entity'):
+        span = entity.find('span').text
+        if span == event_1_span:
+            doctimerel_dict['event_1'] = entity.find('doctimerel').text
+        if span == event_2_span:
+            doctimerel_dict['event_2'] = entity.find('doctimerel').text
+        if len(doctimerel_dict) > 1:
+            break
+    event_rel.event_1.doc_time_rel = doctimerel_dict['event_1']
+    event_rel.event_2.doc_time_rel = doctimerel_dict['event_2']
+    return event_rel, begin_offset, end_offset
     
-    
-def main(sys_out, doc_time_file):
-    lines = []
-    candidate_lines = []
-    event_trigger = 'CONTAINS_SUBEVENT'
-    # ex = ('adrenocarninoma', 103, 109)
-    event_offset_triples = []
-    with open(sys_out, 'r') as events:
-        pass
-    gold_tree = ET.parse(doc_time_file)
+def main(sys_out):
+    current_gold_xml = None
+    with open(sys_out, 'r') as infile:
+        for line in infile:
+            if line.startswith('Doc id'):
+                filename = line.split(':')[-1]
+                current_gold_xml = ET.parse(filename).getroot()
+            else:
+                extract_eventrel_with_doctimerel()
 
 if __name__=='__main__':
     args = parser.parse_args()
