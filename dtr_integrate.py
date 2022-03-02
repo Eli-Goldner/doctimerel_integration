@@ -14,7 +14,6 @@ event_rels = [
 ]
 
 class Event:
-
     def __init__(
             self,
             event_name : str,
@@ -25,7 +24,7 @@ class Event:
             doc_time_rel : str = None
     ):
         self.event_name = event_name
-        self.event_type = event_type,
+        self.event_type = event_type
         self.begin_offset = begin_offset
         self.end_offset = end_offset
         self.event_tag = event_tag
@@ -39,7 +38,6 @@ class Event:
             return f'{self.event_name}({main_body})'
     
 class EventRel:
-
     def __init__(
             self,
             rel_name : str,
@@ -54,17 +52,18 @@ class EventRel:
         return f'{self.rel_name}({str(self.event_1)}, {str(self.event_2)})' 
 
 def string2event(event_str: str):
+    if event_str[-1] != ')':
+        event_str += ')'
     event_ls = re.split('\(|\)', event_str)[:-1]
-    print(event_ls)
     raw_type, raw_offsets, raw_tag = event_ls[1].split('!')
     event_name = event_ls[0]
     event_type = int(raw_type.split('=')[1])
     begin_offset, end_offset = [int(offset) for offset in raw_offsets.split('-')]
     event_tag = raw_tag
     return Event(event_name, event_type, begin_offset, end_offset, event_tag)
-    
+
 def extract_events(events_str: str):
-    return [string2event(event.strip()) for event in events_str[1:-1].split(',')]
+    return [string2event(event.strip()) for event in events_str[1:-1].split('),')]
     
 def extract_event_rel(sysout_line : str):
     event_rel = begin_offset = end_offset = remainder = None
@@ -83,29 +82,34 @@ def extract_event_rel(sysout_line : str):
             elif c == ')' and stack:
                 start = stack.pop()
                 if start == 0:
-                   end_offset = begin_offset + i + 1
-                   print(remainder[:i + 1])
+                   end_offset = begin_offset + len(event_rel) + i + 1
                    event_1, event_2 = extract_events(remainder[:i + 1])
                    return (EventRel(event_rel, event_1, event_2), begin_offset, end_offset)
 
-def event_offset_to_span(event : Type[Event]):
+def event_span(event : Type[Event]):
     return f'{event.begin_offset},{event.end_offset}'
                
 def extract_eventrel_with_doctimerel(line, xml_tree):
     event_rel, begin_offset, end_offset = extract_event_rel(line)
     doctimerel_dict = {}
-    event_1_span = event_offset_to_span(event_rel.event_1)
-    event_2_span = event_offset_to_span(event_rel.event_2)
+    event_1_span = event_span(event_rel.event_1)
+    event_2_span = event_span(event_rel.event_2)
     for entity in xml_tree.iter('entity'):
         span = entity.find('span').text
         if span == event_1_span:
-            doctimerel_dict['event_1'] = entity.find('properties').find('DocTimeRel').text
+            doctimerel = entity.find('properties').find('DocTimeRel')
+            if doctimerel is not None:
+                doctimerel_dict['event_1'] = doctimerel.text
         if span == event_2_span:
-            doctimerel_dict['event_2'] = entity.find('properties').find('DocTimeRel').text
+            doctimerel = entity.find('properties').find('DocTimeRel')
+            if doctimerel is not None:
+                doctimerel_dict['event_2'] = doctimerel.text
         if len(doctimerel_dict) > 1:
             break
-    event_rel.event_1.doc_time_rel = doctimerel_dict['event_1']
-    event_rel.event_2.doc_time_rel = doctimerel_dict['event_2']
+    if 'event_1' in doctimerel_dict:
+        event_rel.event_1.doc_time_rel = doctimerel_dict['event_1']
+    if 'event_2' in doctimerel_dict:
+        event_rel.event_2.doc_time_rel = doctimerel_dict['event_2']
     return event_rel, begin_offset, end_offset
     
 def main(sys_out):
@@ -124,7 +128,6 @@ def main(sys_out):
                 outfile.write(out_line)
                 outfile.write('\n')
                 
-
 if __name__=='__main__':
     args = parser.parse_args()
     main(args.sys_out)
