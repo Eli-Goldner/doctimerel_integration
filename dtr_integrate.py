@@ -8,7 +8,10 @@ parser.add_argument('--sys_out', type=str, help='System output file requiring Do
 
 event_rels = [
     'CONTAINS-SUBEVENT',
+    'BEGINS-ON',
     'CONTAINS',
+    'NOTED-ON',
+    'ENDS-ON',
     'OVERLAP',
     'BEFORE',
 ]
@@ -67,14 +70,16 @@ def extract_events(events_str: str):
     
 def extract_event_rel(sysout_line : str):
     event_rel = begin_offset = end_offset = remainder = None
+    rel_found = False
     for rel in event_rels:
-        rel_split = re.split(rel, sysout_line)
+        rel_split = re.split(rel + '\(', sysout_line)
         if len(rel_split) > 1:
              event_rel = rel
              begin_offset = len(rel_split[0])
-             remainder = rel_split[1]
+             remainder = '(' + rel_split[1]
+             rel_found = True
              break
-    if remainder:
+    if rel_found:
         stack = []
         for i, c in enumerate(remainder):
             if c == '(':
@@ -85,12 +90,15 @@ def extract_event_rel(sysout_line : str):
                    end_offset = begin_offset + len(event_rel) + i + 1
                    event_1, event_2 = extract_events(remainder[:i + 1])
                    return (EventRel(event_rel, event_1, event_2), begin_offset, end_offset)
+    return None, None, None
 
 def event_span(event : Type[Event]):
     return f'{event.begin_offset},{event.end_offset}'
                
 def extract_eventrel_with_doctimerel(line, xml_tree):
     event_rel, begin_offset, end_offset = extract_event_rel(line)
+    if event_rel is None:
+        return event_rel, begin_offset, end_offset
     doctimerel_dict = {}
     event_1_span = event_span(event_rel.event_1)
     event_2_span = event_span(event_rel.event_2)
@@ -115,18 +123,27 @@ def extract_eventrel_with_doctimerel(line, xml_tree):
 def main(sys_out):
     current_gold_xml = None
     outfile_name = 'DocTimeRel_' + sys_out.split('/')[-1]
+    line_count = 0
     with open(sys_out, 'r') as infile, open(outfile_name, 'w') as outfile:
         for line in infile:
+            print(line_count)
+            line_count += 1
             if line.startswith('Doc id'):
+                print('Context Change')
                 outfile.write(line)
                 outfile.write('\n')
-                filename = line.split(':')[-1].strip()
+                filename = line.split(':')[-1].strip() + '.Temporal-Relation.gold.completed.xml'
                 current_gold_xml = ET.parse(filename).getroot()
             else:
+                print(line.split())
                 event_rel, begin, end = extract_eventrel_with_doctimerel(line, current_gold_xml)
-                out_line = line[:begin] + str(event_rel) + line[end:]
-                outfile.write(out_line)
-                outfile.write('\n')
+                if event_rel:
+                    out_line = line[:begin] + str(event_rel) + line[end:]
+                    outfile.write(out_line)
+                    outfile.write('\n')
+                else:
+                    outfile.write(line)
+                    outfile.write('\n')
                 
 if __name__=='__main__':
     args = parser.parse_args()
