@@ -126,24 +126,18 @@ def main(sys_out):
     line_count = 0
     with open(sys_out, 'r') as infile, open(outfile_name, 'w') as outfile:
         for line in infile:
-            print(line_count)
             line_count += 1
             if line.startswith('Doc id'):
-                print('Context Change')
                 outfile.write(line)
-                outfile.write('\n')
                 filename = line.split(':')[-1].strip() + '.Temporal-Relation.gold.completed.xml'
                 current_gold_xml = ET.parse(filename).getroot()
-            else:
-                print(line.split())
+            else: 
                 event_rel, begin, end = extract_eventrel_with_doctimerel(line, current_gold_xml)
                 if event_rel:
                     out_line = line[:begin] + str(event_rel) + line[end:]
-                    outfile.write(out_line)
-                    outfile.write('\n')
                 else:
-                    outfile.write(line)
-                    outfile.write('\n')
+                    out_line = line
+                outfile.write(out_line)
                 
 if __name__=='__main__':
     args = parser.parse_args()
